@@ -6,9 +6,21 @@ Parameters:
     Type: String
     Default: 6.1.0
 
+  CreateDnsRecord:
+    Type: String
+    Default: false
+    Description: Whether or not to create a DNS record as 'devbox.${DomainName}'. Requires HostedZoneId and DomainName parameters.
+    AllowedValues:
+    - true
+    - false
+
   DockerComposeVersion:
     Type: String
     Default: 1.27.4
+
+  DomainName:
+    Type: String
+    Description: The fully-qualified domain name in the form 'example.com'
 
   DotfilesRepo:
     Type: String
@@ -26,6 +38,10 @@ Parameters:
   GradleVersion:
     Type: String
     Default: 6.6.1
+
+  HostedZoneId:
+    Type: String
+    Description: The AWS Route53 id assigned to the hosted zone
 
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -59,7 +75,10 @@ Parameters:
     Default: vpc-9bfe4be6
 
 #######################################################################
-#Conditions:
+Conditions:
+  CreateDnsRecord: !Equals
+  - !Ref CreateDnsRecord
+  - true
 
 #######################################################################
 #Outputs:
@@ -229,15 +248,16 @@ Resources:
   InstanceDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
-      DashboardName: !Sub ${AWS::StackName}-devbox
+      DashboardName: devbox
       DashboardBody: !Sub |
         {"widgets":[{"type":"metric","x":0,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","CPUUtilization","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"CPU utilization (%)"}},{"type":"metric","x":6,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (any) (count)"}},{"type":"metric","x":12,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed_Instance","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (instance) (count)"}},{"type":"metric","x":18,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed_System","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (system) (count)"}},{"type":"metric","x":0,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkIn","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network in (bytes)"}},{"type":"metric","x":6,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkOut","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network out (bytes)"}},{"type":"metric","x":12,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkPacketsIn","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network packets in (count)"}},{"type":"metric","x":18,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkPacketsOut","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network packets out (count)"}},{"type":"metric","x":0,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskReadBytes","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk reads (bytes)"}},{"type":"metric","x":6,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskReadOps","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk read operations (operations)"}},{"type":"metric","x":12,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskWriteBytes","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk writes (bytes)"}},{"type":"metric","x":18,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskWriteOps","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk write operations (operations)"}}]}
 
   InstanceDnsRecord:
     Type: AWS::Route53::RecordSet
+    Condition: CreateDnsRecord
     Properties:
-      HostedZoneId: !ImportValue HostedZoneCom
-      Name: !Sub ${AWS::StackName}.vestigoactum.com
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub devbox.${DomainName}
       ResourceRecords:
       - !Ref InstanceIp
       TTL: 600
@@ -273,7 +293,7 @@ Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: varunmc-devbox
+      GroupDescription: devbox
       SecurityGroupIngress:
       - CidrIp: 0.0.0.0/0
         Description: ssh
@@ -290,6 +310,11 @@ Resources:
         FromPort: 6222
         IpProtocol: udp
         ToPort: 6222
+      - CidrIp: 0.0.0.0/0
+        Description: rest-proxy
+        FromPort: 8082
+        IpProtocol: tcp
+        ToPort: 8082
       - CidrIp: 0.0.0.0/0
         Description: control-center
         FromPort: 9021
