@@ -215,7 +215,7 @@ Resources:
           cat <<- 'EOF' >> /home/ec2-user/.bash_profile
 
           export AWS_REGION=${AWS::Region}
-          export AWS_CODECOIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
+          export AWS_CODECOMMIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
           export GRADLE_HOE=/opt/gradle
           export JAVA_HOE=/opt/java
           export PATH=/opt/gradle/bin:$JAVA_HOE/bin:$PATH
@@ -241,7 +241,7 @@ Resources:
           alias vim=nvim
 
           # prompt
-          [[ -z $IA ]] && export IA=$(cat $HOE/.ssh/authorized_keys | sed 's/.*== \(.*\)$/\1/')
+          [[ -z $IA ]] && export IA=$(cat $HOME/.ssh/authorized_keys | sed 's/.*== \(.*\)$/\1/')
           export PS1="[$IA@\h \W]\\$ "
           EOF
 
