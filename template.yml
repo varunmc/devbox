@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+#######################################################################
+Parameters:
+  ConfluentVersion:
+    Type: String
+    Default: 6.1.0
+
+  DockerComposeVersion:
+    Type: String
+    Default: 1.27.4
+
+  DotfilesRepo:
+    Type: String
+
+  EbsVolumeSize:
+    Type: Number
+    Default: 64
+
+  Email:
+    Type: String
+
+  FullName:
+    Type: String
+
+  GradleVersion:
+    Type: String
+    Default: 6.6.1
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0c94855ba95c71c99
+
+  InstanceType:
+    Type: String
+    Default: m5.large
+
+  JdtlsVersionShort:
+    Type: String
+    Default: 0.67.0
+
+  JdtlsVersionLong:
+    Type: String
+    Default: 0.67.0-20201217045
+
+  MoshVersion:
+    Type: String
+    Default: 1.3.2
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-4c8b122a
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-9bfe4be6
+
+#######################################################################
+#Conditions:
+
+#######################################################################
+#Outputs:
+
+#######################################################################
+Resources:
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+      - DeviceName: /dev/xvda
+        Ebs:
+          DeleteOnTermination: true
+          VolumeSize: !Ref EbsVolumeSize
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+      - !Ref InstanceSecurityGroup
+      SubnetId: !Ref SubnetId
+      UserData:
+        Fn::Base64: !Sub |
+          #! /bin/bash
+          set -x
+          cd /opt
+
+          yum update --assumeyes
+          yum install --assumeyes git jq python3 tree
+          yum group install --assumeyes 'Development Tools'
+
+          # aws
+          curl --output /opt/awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+          unzip -d /opt/awscliv2 /opt/awscliv2.zip
+          /opt/awscliv2/aws/install
+          aws configure set region ${AWS::Region}
+          pip3 install --upgrade awslogs
+
+          # confluent
+          curl --http1.1 --location --silent https://cnfl.io/ccloud-cli | sh -s -- -b /usr/local/bin
+          /usr/local/bin/ccloud update
+
+          mkdir /opt/connect-plugins /opt/ksql-extensions
+          chown -R ec2-user:ec2-user /opt/connect-plugins /opt/ksql-extensions
+
+          # docker
+          yum install --assumeyes docker
+          systemctl enable docker
+          systemctl start docker
+          usermod --append --groups docker ec2-user
+          curl --location --output /usr/local/bin/docker-compose --silent https://github.com/docker/compose/releases/download/${DockerComposeVersion}/docker-compose-$(uname --kernel-name)-$(uname --machine)
+          chmod +x /usr/local/bin/docker-compose
+
+          # ecscli
+          curl --location --output /usr/local/bin/ecscli --silent https://amazon-ecs-cli.s3.amazonaws.com/ecs-cli-linux-amd64-latest
+          chmod +x /usr/local/bin/ecscli
+
+          # elasticsearch
+          # https://github.com/elastic/elasticsearch-docker/issues/92
+          cp /etc/sysctl.d/99-sysctl.conf /etc/sysctl.d/99-elasticsearch.conf
+          echo 'vm.max_map_count=262144' >> /etc/sysctl.d/99-elasticsearch.conf
+          sysctl --system
+
+          # gradle
+          curl --location --remote-name --silent https://services.gradle.org/distributions/gradle-${GradleVersion}-all.zip
+          unzip -d /opt -oq gradle-${GradleVersion}-all.zip
+          ln -s /opt/gradle-${GradleVersion} /opt/gradle
+
+          # java
+          yum install --assumeyes ctags
+          curl --location --silent https://download.java.net/java/GA/jdk14.0.1/664493ef4a6946b186ff29eb326336a2/7/GPL/openjdk-14.0.1_linux-x64_bin.tar.gz | tar --directory /opt --extract --file - --gzip
+          ln -s /opt/jdk-14.0.1 /opt/java
+          unzip -q /opt/java/lib/src.zip -d /opt/java/lib/src
+          ctags -f /opt/java/lib/src.tags --recurse /opt/java/lib/src
+
+          # jdtls
+          mkdir /opt/jdtls
+          curl --location --silent https://download.eclipse.org/jdtls/milestones/${JdtlsVersionShort}/jdt-language-server-${JdtlsVersionLong}.tar.gz | sudo tar --directory /opt/jdtls --extract --file - --gzip
+
+          # kafkacat
+          yum install --assumeyes cmake libcurl-devel
+          git clone https://github.com/edenhill/kafkacat.git /opt/kafkacat
+          cd /opt/kafkacat
+          ./bootstrap.sh
+          make install
+
+          # mosh
+          yum install --assumeyes ncurses-devel openssl-devel protobuf-compiler protobuf-devel
+          curl --location --silent https://mosh.org/mosh-${MoshVersion}.tar.gz | tar --directory /opt --extract --file - --gzip
+          ln -s /opt/mosh-${MoshVersion} /opt/mosh
+          cd /opt/mosh
+          ./configure
+          make
+          make install
+
+          # nvim
+          yum install --assumeyes fuse fuse-libs
+          curl --create-dirs --location --output /usr/local/bin/nvim --silent https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
+          chmod +x /usr/local/bin/nvim
+          pip3 install --upgrade neovim
+
+          # ssh
+          # move to port 443 to accomodate public WiFi, a.k.a. 'Digital Nomad' mode
+          sed -i 's/#Port 22/Port 443/' /etc/ssh/sshd_config
+          systemctl restart sshd
+
+          ##################
+          ### User Level ###
+          ##################
+
+          # aws
+          sudo --login --user ec2-user aws configure set region ${AWS::Region}
+
+          # git
+          sudo --login --user ec2-user cat <<-'EOF' > /home/ec2-user/.gitconfig
+          [color]
+            branch = auto
+            diff = auto
+            interactive = auto
+            pager = true
+            status = auto
+            ui = true
+          [core]
+            editor = nvim
+          [credential]
+            helper = !aws codecommit credential-helper $@
+            UseHttpPath = true
+          [user]
+            name = ${FullName}
+            email = ${Email}
+          EOF
+
+          # bash_profile
+          cat <<- 'EOF' >> /home/ec2-user/.bash_profile
+
+          export AWS_REGION=${AWS::Region}
+          export AWS_CODECOIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
+          export GRADLE_HOE=/opt/gradle
+          export JAVA_HOE=/opt/java
+          export PATH=/opt/gradle/bin:$JAVA_HOE/bin:$PATH
+          EOF
+
+          # dotfiles
+          sudo --login --user ec2-user git clone --bare ${DotfilesRepo} /home/ec2-user/.dotfiles
+          sudo --login --user ec2-user git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user config --local status.showUntrackedFiles no
+          sudo --login --user ec2-user git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user checkout
+
+          # nvm
+          curl --location --silent https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | sudo --login --user ec2-user bash
+          sudo --login --user ec2-user nvm install --lts
+
+          # bashrc
+          # WARN: must be last
+          cat <<- 'EOF' >> /home/ec2-user/.bashrc
+
+          # aliases
+          alias _='env | sort | less'
+          alias dot='git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user'
+          alias kafkacat='kafkacat -b localhost:9092 -K='
+          alias vim=nvim
+
+          # prompt
+          [[ -z $IA ]] && export IA=$(cat $HOE/.ssh/authorized_keys | sed 's/.*== \(.*\)$/\1/')
+          export PS1="[$IA@\h \W]\\$ "
+          EOF
+
+  InstanceDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-devbox
+      DashboardBody: !Sub |
+        {"widgets":[{"type":"metric","x":0,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","CPUUtilization","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"CPU utilization (%)"}},{"type":"metric","x":6,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (any) (count)"}},{"type":"metric","x":12,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed_Instance","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (instance) (count)"}},{"type":"metric","x":18,"y":0,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","StatusCheckFailed_System","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Status check failed (system) (count)"}},{"type":"metric","x":0,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkIn","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network in (bytes)"}},{"type":"metric","x":6,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkOut","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network out (bytes)"}},{"type":"metric","x":12,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkPacketsIn","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network packets in (count)"}},{"type":"metric","x":18,"y":4,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","NetworkPacketsOut","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Network packets out (count)"}},{"type":"metric","x":0,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskReadBytes","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk reads (bytes)"}},{"type":"metric","x":6,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskReadOps","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk read operations (operations)"}},{"type":"metric","x":12,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskWriteBytes","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk writes (bytes)"}},{"type":"metric","x":18,"y":8,"width":6,"height":4,"properties":{"view":"timeSeries","stat":"Average","period":300,"stacked":false,"region":"${AWS::Region}","yAxis":{"left":{"min":0}},"metrics":[["AWS/EC2","DiskWriteOps","InstanceId","${Instance}",{"label":"${Instance}"}]],"title":"Disk write operations (operations)"}}]}
+
+  InstanceDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !ImportValue HostedZoneCom
+      Name: !Sub ${AWS::StackName}.vestigoactum.com
+      ResourceRecords:
+      - !Ref InstanceIp
+      TTL: 600
+      Type: A
+
+  InstanceIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref Instance
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - !Ref InstanceRole
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AdministratorAccess
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: varunmc-devbox
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        Description: ssh
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      - CidrIp: 0.0.0.0/0
+        Description: kibana
+        FromPort: 5601
+        IpProtocol: tcp
+        ToPort: 5601
+      - CidrIp: 0.0.0.0/0
+        Description: mosh
+        FromPort: 6222
+        IpProtocol: udp
+        ToPort: 6222
+      - CidrIp: 0.0.0.0/0
+        Description: control-center
+        FromPort: 9021
+        IpProtocol: tcp
+        ToPort: 9021
+      VpcId: !Ref VpcId
+
