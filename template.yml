@@ -2,17 +2,22 @@ AWSTemplateFormatVersion: 2010-09-09
 
 #######################################################################
 Parameters:
-  ConfluentVersion:
-    Type: String
-    Default: 6.1.0
 
   CreateDnsRecord:
+    Description: Whether or not to create a DNS record as 'devbox.${DomainName}'. Requires HostedZoneId and DomainName parameters.
     Type: String
     Default: false
-    Description: Whether or not to create a DNS record as 'devbox.${DomainName}'. Requires HostedZoneId and DomainName parameters.
     AllowedValues:
     - true
     - false
+
+  ConfluentVersionLong:
+    Type: String
+    Default: 6.1.0
+
+  ConfluentVersionShort:
+    Type: String
+    Default: 6.1
 
   DockerComposeVersion:
     Type: String
@@ -20,7 +25,7 @@ Parameters:
 
   DomainName:
     Type: String
-    Description: The fully-qualified domain name in the form 'example.com'
+    Description: The fully-qualified domain name in the form 'example.com'. Required if CreateDnsRecord is true.
 
   DotfilesRepo:
     Type: String
@@ -41,7 +46,7 @@ Parameters:
 
   HostedZoneId:
     Type: String
-    Description: The AWS Route53 id assigned to the hosted zone
+    Description: The AWS Route53 id assigned to the hosted zone. Required if CreateDnsRecord is true.
 
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -116,6 +121,7 @@ Resources:
           /opt/awscliv2/aws/install
           aws configure set region ${AWS::Region}
           pip3 install --upgrade awslogs
+          rm -f /opt/awscliv2.zip
 
           # confluent
           curl --http1.1 --location --silent https://cnfl.io/ccloud-cli | sh -s -- -b /usr/local/bin
@@ -123,6 +129,9 @@ Resources:
 
           mkdir /opt/connect-plugins /opt/ksql-extensions
           chown -R ec2-user:ec2-user /opt/connect-plugins /opt/ksql-extensions
+
+          curl --location --silent http://packages.confluent.io/archive/${ConfluentVersionShort}/confluent-community-${ConfluentVersionLong}.tar.gz | tar --directory /opt --extract --file - --gzip
+          ln -s /opt/confluent-${ConfluentVersionLong} /opt/confluent
 
           # docker
           yum install --assumeyes docker
@@ -146,6 +155,7 @@ Resources:
           curl --location --remote-name --silent https://services.gradle.org/distributions/gradle-${GradleVersion}-all.zip
           unzip -d /opt -oq gradle-${GradleVersion}-all.zip
           ln -s /opt/gradle-${GradleVersion} /opt/gradle
+          rm -f /opt/gradle-${GradleVersion}-all.zip
 
           # java
           yum install --assumeyes ctags
@@ -192,33 +202,47 @@ Resources:
           # aws
           sudo --login --user ec2-user aws configure set region ${AWS::Region}
 
-          # git
-          sudo --login --user ec2-user cat <<-'EOF' > /home/ec2-user/.gitconfig
-          [color]
-            branch = auto
-            diff = auto
-            interactive = auto
-            pager = true
-            status = auto
-            ui = true
-          [core]
-            editor = nvim
-          [credential]
-            helper = !aws codecommit credential-helper $@
-            UseHttpPath = true
-          [user]
-            name = ${FullName}
-            email = ${Email}
-          EOF
+          # bashrc
+          cat <<- 'EOF' >> /home/ec2-user/.bashrc
+
+            # aliases
+            alias _='env | sort | less'
+            alias dot='git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user'
+            alias kafkacat='kafkacat -b localhost:9092 -K='
+            alias vim=nvim
+
+            # prompt
+            [[ -z $IA ]] && export IA=$(cat $HOME/.ssh/authorized_keys | sed 's/.*== \(.*\)$/\1/')
+            export PS1="[$IA@\h \W]\\$ "
+            EOF
 
           # bash_profile
           cat <<- 'EOF' >> /home/ec2-user/.bash_profile
 
-          export AWS_REGION=${AWS::Region}
-          export AWS_CODECOMMIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
-          export GRADLE_HOE=/opt/gradle
-          export JAVA_HOE=/opt/java
-          export PATH=/opt/gradle/bin:$JAVA_HOE/bin:$PATH
+            export AWS_REGION=${AWS::Region}
+            export AWS_CODECOMMIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
+            export GRADLE_HOME=/opt/gradle
+            export JAVA_HOME=/opt/java
+            export PATH=/opt/confluent/bin:$GRADLE_HOME/bin:$JAVA_HOME/bin:$PATH
+          EOF
+
+          # git
+          sudo --login --user ec2-user cat <<-'EOF' > /home/ec2-user/.gitconfig
+            [color]
+              branch = auto
+              diff = auto
+              interactive = auto
+              pager = true
+              status = auto
+              ui = true
+            [core]
+              editor = nvim
+            [credential]
+              helper = !aws codecommit credential-helper $@
+              UseHttpPath = true
+            [user]
+              name = ${FullName}
+              email = ${Email}
           EOF
 
           # dotfiles
@@ -229,21 +253,6 @@ Resources:
           # nvm
           curl --location --silent https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | sudo --login --user ec2-user bash
           sudo --login --user ec2-user nvm install --lts
-
-          # bashrc
-          # WARN: must be last
-          cat <<- 'EOF' >> /home/ec2-user/.bashrc
-
-          # aliases
-          alias _='env | sort | less'
-          alias dot='git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user'
-          alias kafkacat='kafkacat -b localhost:9092 -K='
-          alias vim=nvim
-
-          # prompt
-          [[ -z $IA ]] && export IA=$(cat $HOME/.ssh/authorized_keys | sed 's/.*== \(.*\)$/\1/')
-          export PS1="[$IA@\h \W]\\$ "
-          EOF
 
   InstanceDashboard:
     Type: AWS::CloudWatch::Dashboard
