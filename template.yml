@@ -116,8 +116,8 @@ Resources:
           yum group install --assumeyes 'Development Tools'
 
           # aws
-          curl --output /opt/awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
-          unzip -d /opt/awscliv2 /opt/awscliv2.zip
+          curl --location --output /opt/awscliv2.zip --silent https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+          unzip -d /opt/awscliv2 -q /opt/awscliv2.zip
           /opt/awscliv2/aws/install
           aws configure set region ${AWS::Region}
           pip3 install --upgrade awslogs
@@ -153,7 +153,7 @@ Resources:
 
           # gradle
           curl --location --remote-name --silent https://services.gradle.org/distributions/gradle-${GradleVersion}-all.zip
-          unzip -d /opt -oq gradle-${GradleVersion}-all.zip
+          unzip -d /opt -q gradle-${GradleVersion}-all.zip
           ln -s /opt/gradle-${GradleVersion} /opt/gradle
           rm -f /opt/gradle-${GradleVersion}-all.zip
 
@@ -161,7 +161,7 @@ Resources:
           yum install --assumeyes ctags
           curl --location --silent https://download.java.net/java/GA/jdk14.0.1/664493ef4a6946b186ff29eb326336a2/7/GPL/openjdk-14.0.1_linux-x64_bin.tar.gz | tar --directory /opt --extract --file - --gzip
           ln -s /opt/jdk-14.0.1 /opt/java
-          unzip -q /opt/java/lib/src.zip -d /opt/java/lib/src
+          unzip -d /opt/java/lib/src -q /opt/java/lib/src.zip
           ctags -f /opt/java/lib/src.tags --recurse /opt/java/lib/src
 
           # jdtls
@@ -189,6 +189,12 @@ Resources:
           curl --create-dirs --location --output /usr/local/bin/nvim --silent https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
           chmod +x /usr/local/bin/nvim
           pip3 install --upgrade neovim
+
+          # sam
+          curl --location --remote-name --silent https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
+          unzip -d /opt/aws-sam-cli -q aws-sam-cli-linux-x86_64.zip
+          ./opt/aws-sam-cli/install
+          rm -rf /opt/aws-sam-cli
 
           # ssh
           # move to port 443 to accomodate public WiFi, a.k.a. 'Digital Nomad' mode
