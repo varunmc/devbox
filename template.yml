@@ -209,6 +209,7 @@ Resources:
             alias _='env | sort | less'
             alias dot='git --git-dir /home/ec2-user/.dotfiles --work-tree /home/ec2-user'
             alias kafkacat='kafkacat -b localhost:9092 -K='
+            alias 'kafka-topics'='kafka-topics --bootstrap-server localhost:9092'
             alias vim=nvim
 
             # prompt
