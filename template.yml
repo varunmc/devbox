@@ -229,6 +229,10 @@ Resources:
             export AWS_REGION=${AWS::Region}
             export AWS_CODECOMMIT_URL=https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos
             export GRADLE_HOME=/opt/gradle
+            export HISTCONTROL=ignorespace
+            export KAFKA_API_KEY=$(aws secretsmanager get-secret-value --query SecretString --output text --secret-id KafkaCredentialsTest | jq --raw-output .key)
+            export KAFKA_API_SECRET=$(aws secretsmanager get-secret-value --query SecretString --output text --secret-id KafkaCredentialsTest | jq --raw-output .secret)
+            export KAFKA_BROKER=$(aws ssm get-parameter --query Parameter.Value --name KafkaBrokerTest --output text)
             export JAVA_HOME=/opt/java
             export PATH=/opt/confluent/bin:$GRADLE_HOME/bin:$JAVA_HOME/bin:$PATH
           EOF
